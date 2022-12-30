@@ -1,0 +1,198 @@
+20221228_install_wireguard
+install wireguard Ubuntu 22.04.1 LTS
+
+IPv6無効化
+==========
+
+$ sudo cp -p /etc/sysctl.conf /etc/sysctl.conf_`date +%Y%m%d-%H%M%S`
+$ sudo vi /etc/sysctl.conf
+
+net.ipv6.conf.all.disable_ipv6=1
+net.ipv6.conf.default.disable_ipv6=1
+net.ipv6.conf.lo.disable_ipv6=1
+
+
+$ sudo vi /etc/rc.local
+
+#!/bin/bash
+
+/etc/init.d/procps restart
+
+exit 0
+
+$ sudo chmod 755 /etc/rc.local
+$ sudo reboot
+
+
+
+固定IP設定
+==========
+
+$ sudo mv /etc/netplan/00-installer-config.yaml /etc/netplan/00-installer-config.yaml.disabled
+$ sudo cp /etc/netplan/00-installer-config.yaml.disabled 99-netcfg.yaml
+$ sudo vi /etc/netplan/99-netcfg.yaml
+
+network:
+  ethernets:
+    eno1:
+      dhcp4: false
+      addresses: [172.20.125.18/24]
+      routes:
+        - to: default
+          via: 172.20.125.254
+      nameservers:
+        addresses: [10.1.1.1, 10.1.1.3]
+  version: 2
+
+$ sudo netplan apply
+
+
+
+プロキシ設定
+============
+
+$ vi ~/.bashrc
+
+export https_proxy="http://somepxy20.xxxxxx.co.jp:8080/"
+export http_proxy="http://somepxy20.xxxxxx.co.jp:8080/"
+
+$ source ~/.bashrc
+
+$ sudo vi /etc/apt/apt.conf.d/30proxy
+
+Acquire::http { Proxy "http://somepxy20.xxxxxx.co.jp:8080/"; };
+Acquire::https { Proxy "http://somepxy20.xxxxxx.co.jp:8080/"; };
+
+$ sudo apt-get update
+
+
+
+インストール
+============
+
+$ sudo apt install -y wireguard
+
+$ wg version
+wireguard-tools v1.0.20210914 - https://git.zx2c4.com/wireguard-tools/
+
+
+サーバー用鍵ペアの作成
+鍵は設定ファイルに直接記述するため、保存しておく必要はない。
+
+$ wg genkey | sudo tee /etc/wireguard/server.key
+$ sudo chmod 600 /etc/wireguard/server.key
+
+$ sudo cat /etc/wireguard/server.key | wg pubkey | sudo tee /etc/wireguard/server.pub
+$ sudo chmod 600 /etc/wireguard/server.pub
+
+
+設定ファイルの作成
+
+$ sudo touch /etc/wireguard/wg0.conf
+$ sudo vi /etc/wireguard/wg0.conf
+
+[Interface]
+PrivateKey = 作成したサーバーの秘密鍵
+Address = *.*.*.* (サーバーのインターフェイスに割り当てるIPアドレス)
+ListenPort = 51820
+
+[Peer]
+PublicKey = 作成したクライアントの公開鍵
+AllowedIPs = *.*.*.*/32 (クライアントに割り当てたIPアドレス) = クライアントのVPN用Gateway
+
+例）
+～～～～～～～～～～
+[Interface]
+PrivateKey = 2D6AdX***rJn1PMBYG+0gpVD3kUriLFg=
+Address = 172.20.125.18
+ListenPort = 51820
+
+[Peer]
+PublicKey = lTJidLY***9/wIq1mDkfzp2qBNnc=
+AllowedIPs = 10.254.254.254/32
+～～～～～～～～～～
+
+
+WireGuardの起動
+
+$ sudo systemctl enable wg-quick@wg0
+$ sudo systemctl start wg-quick@wg0
+
+wg0 のインターフェイスが起動していることを確認する。
+
+$ ip addr
+
+
+
+LAN内へのルーティングを行う
+============
+
+$ sudo vi /etc/sysctl.conf
+net.ipv4.ip_forward=1のコメントアウトを解除
+
+$ sudo sysctl -p
+
+サーバの wg0.conf の[Interface]セクションに下記を追加、enXXX は実際のインターフェイスに置き換え
+
+PostUp = iptables -A FORWARD -i wg0 -j ACCEPT; iptables -t nat -A POSTROUTING -o enXXX -j MASQUERAD
+PostDown = iptables -D FORWARD -i wg0 -j ACCEPT; iptables -t nat -D POSTROUTING -o enXXX -j MASQUERADE
+
+$ sudo systemctl restart wg-quick@wg0
+
+
+
+クライアントの設定
+============
+
+wg0.conf
+
+[Interface]
+PrivateKey = クライアントの秘密鍵
+Address = *.*.*.* (クライアントのIPアドレス) = クライアントのVPN用Gateway
+
+[Peer]
+PublicKey = サーバーの公開鍵
+EndPoint = サーバーのIPアドレス:51820
+AllowedIPs = *.*.*.*/24 (WireGuardを経由して通信する先のIPアドレス)
+
+
+例）
+～～～～～～～～～～
+[Interface]
+PrivateKey = iNlGCCUR62***GwUt13uajAuLcdG00=
+Address = 10.254.254.254
+
+[Peer]
+PublicKey = 6MEBQC6Hb2S***Dzd+S30zLLm5/bjZSU=
+EndPoint = 10.134.8.18:51820
+AllowedIPs = 172.21.49.0/24
+～～～～～～～～～～
+
+
+
+接続状態確認
+============
+
+$ sudo wg
+interface: wg0
+  public key: 6MEBQC6***SDzd+S30zLLm5/bjZSU=
+  private key: (hidden)
+  listening port: 51820
+
+peer: lTJidLYpZb****/wIq1mDkfzp2qBNnc=
+  endpoint: 10.*.*.19:55161
+  allowed ips: 10.254.254.254/32
+  latest handshake: 1 minute, 10 seconds ago
+  transfer: 2.39 KiB received, 220 B sent
+$
+
+
+
+実際にこれにより、下記が
+10.*.*.0/16 === X ===> someserver.xxxxxx.co.jp [172.21.49.1]
+通信できない宛先だったが、
+
+wireguardでの接続後に
+10.*.*.0/16 === OK ===> someserver.xxxxxx.co.jp [172.21.49.1]
+通信できるようになった
+
