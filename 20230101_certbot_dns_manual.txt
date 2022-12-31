@@ -1,0 +1,49 @@
+20230101_certbot_dns_manual
+install certbot and get certificate by dns-01
+Raspbian GNU/Linux 10 (buster)
+
+
+インストール
+============
+
+$ sudo apt install -y python3-certbot
+
+
+
+証明書の取得
+============
+
+$ certbot certonly --manual -d XXXXXXX.xxx --preferred-challenges dns
+
+画面の指示に従うだけ。
+メールアドレスの入力あり。メールニュースはNoにした。
+途中で下記のように表示されるので、TXTレコードを設定。
+
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Please deploy a DNS TXT record under the name
+_acme-challenge.XXXXXXX.xxx with the following value:
+
+XxnuN1TnQT****ZRjRsiYIQ5cM
+
+Before continuing, verify the record is deployed.
+- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+Press Enter to Continue
+
+
+最終的に下記のように表示されて終わる。
+
+IMPORTANT NOTES:
+ - Congratulations! Your certificate and chain have been saved at:
+   /etc/letsencrypt/live/XXXXXXX.xxx/fullchain.pem
+   Your key file has been saved at:
+   /etc/letsencrypt/live/XXXXXXX.xxx/privkey.pem
+   Your cert will expire on 2023-03-31. To obtain a new or tweaked
+   ...
+
+
+
+証明書の更新
+============
+
+$ sudo certbot renew
+
